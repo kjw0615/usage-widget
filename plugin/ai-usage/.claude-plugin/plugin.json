@@ -1,6 +1,6 @@
 {
   "name": "ai-usage",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude 남은 사용량(5시간·주간, 갱신 시각)을 Claude Code 상태줄과 /ai-usage 명령으로 보여줍니다.",
   "license": "MIT"
 }

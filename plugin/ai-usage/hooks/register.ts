@@ -78,8 +78,35 @@ let blockedUntil = 0
 let view: Result | undefined
 let good: Result | undefined
 
+// 세션(창)마다 따로 조회하면 요청 제한(429)에 쉽게 걸리므로, 모든 세션이 같은 파일로 결과를 공유한다.
+type Shared = { t: number; until: number; view?: Result; good?: Result }
+
+async function readShared($: Api): Promise<Shared | undefined> {
+  try {
+    return JSON.parse(await $.fs.read(`${await home($)}/.claude/ai-usage-cache.json`))
+  } catch {
+    return undefined
+  }
+}
+
+async function writeShared($: Api, s: Shared): Promise<void> {
+  try {
+    await $.fs.write(`${await home($)}/.claude/ai-usage-cache.json`, JSON.stringify(s))
+  } catch {
+    // 공유 파일을 못 써도 이 세션 안에서는 계속 동작
+  }
+}
+
 async function cached($: Api): Promise<Result> {
   const now = Date.now()
+  const sh = await readShared($)
+  if (sh && sh.t > lastTry) {
+    // 다른 세션이 더 최근에 조회했다면 그 결과를 이어받는다
+    lastTry = sh.t
+    blockedUntil = sh.until
+    if (sh.view) view = sh.view
+    if (sh.good) good = sh.good
+  }
   if (view && (now < blockedUntil || now - lastTry < MIN_INTERVAL_MS)) return view
   lastTry = now
   let d = await fetchClaude($)
@@ -91,6 +118,7 @@ async function cached($: Api): Promise<Result> {
     blockedUntil = 0
   }
   view = d
+  await writeShared($, { t: lastTry, until: blockedUntil, view, good })
   return d
 }
 
