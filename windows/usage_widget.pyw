@@ -36,7 +36,6 @@ BG = CARD = FG = DIM = BAR = BORDER = GREEN = YELLOW = RED = ""
 def apply_theme(name):
     """위젯 창 모드의 색 테마(dark/light)를 전역 색 변수에 적용"""
     globals().update(THEMES.get(name, THEMES["dark"]))
-    globals()["CARD"] = globals()["BG"]  # 행 배경도 같은 색 -> 배경 투명도를 한 번에 적용
 
 
 apply_theme("dark")  # 작업표시줄 막대는 자체 로직(시스템 테마/설정)으로 색을 정한다
@@ -103,6 +102,46 @@ def fetch_claude():
         return {"rows": rows}
     except Exception as e:  # noqa: BLE001
         return err_dict(e)
+
+
+SHARED_CLAUDE = HOME / ".claude" / "ai-usage-cache.json"  # Claude Code 플러그인(ai-usage)과 공유하는 캐시
+
+
+def fetch_claude_shared():
+    """위젯·플러그인·여러 세션이 각자 조회하면 요청 제한(429)에 걸리므로, 최근 조회 결과를 파일로 공유한다."""
+    now = time.time() * 1000
+    sh = {}
+    try:
+        sh = json.loads(SHARED_CLAUDE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        pass
+    view = sh.get("view")
+    if view and (now < sh.get("until", 0) or now - sh.get("t", 0) < 180_000):
+        if view.get("rows"):
+            d = {"rows": [(r["label"], float(r["remain"]),
+                           datetime.fromtimestamp(r["resetMs"] / 1000).astimezone()) for r in view["rows"]]}
+            if view.get("stale"):
+                d["stale"] = view["stale"]
+                d["short"] = view.get("short", "")
+            return d
+        return {"error": view.get("error", "오류"), "short": view.get("short", ""),
+                "retry": max(0, (sh.get("until", 0) - now) / 1000)}
+    d = fetch_claude()
+    try:
+        good = sh.get("good")
+        if "rows" in d:
+            rows = [{"label": l, "remain": r, "resetMs": int(t.timestamp() * 1000)} for l, r, t in d["rows"]]
+            view = good = {"rows": rows}
+            until = 0
+        else:
+            view = {"error": d["error"], "short": d.get("short", "")}
+            if good and good.get("rows"):
+                view = {"rows": good["rows"], "stale": d["error"], "short": d.get("short", "")}
+            until = now + d.get("retry", 0) * 1000
+        SHARED_CLAUDE.write_text(json.dumps({"t": now, "until": until, "view": view, "good": good}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    return d
 
 
 def fetch_codex_local():
@@ -234,7 +273,7 @@ def cached(name, fn, interval):
 
 
 PROVIDERS = {
-    "Claude": lambda: cached("Claude", fetch_claude, 180),
+    "Claude": lambda: cached("Claude", fetch_claude_shared, 180),
     "Codex": lambda: cached("Codex", fetch_codex, 120),
     "Gemini": lambda: cached("Gemini", fetch_gemini, 180),
 }
@@ -375,18 +414,6 @@ class Widget(tk.Tk):
         self.attributes("-topmost", True)
         self.configure(bg=BG, highlightbackground=BORDER, highlightthickness=1)
         self.geometry(f"+{self.cfg.get('x', 60)}+{self.cfg.get('y', 60)}")
-        self.back = None
-        if not IS_MAC:
-            # 본체의 배경색은 완전 투명(color key) -> 글자·사용량 막대만 불투명하게 남는다.
-            # 그 뒤에 같은 크기의 배경 창을 두고, 슬라이더로 이 창의 알파만 조절한다.
-            self.attributes("-transparentcolor", BG)
-            self.bg_alpha = float(self.cfg.get("bg_alpha", 0.85))
-            self.back = tk.Toplevel(self)
-            self.back.overrideredirect(True)
-            self.back.attributes("-topmost", True)
-            self.back.attributes("-alpha", max(0.01, self.bg_alpha))
-            self.back.configure(bg=BG)
-
         self.full = tk.Frame(self, bg=BG)
         self.compact = tk.Frame(self, bg=BG)
         self.sections = {n: Section(self.full, n) for n in PROVIDERS}
@@ -406,8 +433,6 @@ class Widget(tk.Tk):
         for key, label in (("light", "밝은 테마"), ("dark", "다크 테마")):
             tmenu.add_radiobutton(label=label, value=key, variable=self.theme_var, command=self.change_theme)
         menu.add_cascade(label="테마", menu=tmenu)
-        if self.back is not None:
-            menu.add_command(label="배경 투명도 조절...", command=self.open_alpha)
         menu.add_command(label="지금 새로고침", command=self.refresh)
         menu.add_command(label="항상 위 토글", command=self.toggle_top)
         menu.add_command(label="상태표시줄 모드로 전환" if IS_MAC else "작업표시줄 모드로 전환",
@@ -418,15 +443,11 @@ class Widget(tk.Tk):
 
         self.bind_all("<ButtonPress-1>", self._drag_start, add="+")
         self.bind_all("<B1-Motion>", self._drag, add="+")
-        self.bind_all("<ButtonRelease-1>", lambda e: self._mine(e) and self.save(), add="+")
-        self.bind_all("<Double-Button-1>", lambda e: self._mine(e) and self.refresh(), add="+")
-        self.bind_all("<Button-3>", lambda e: self._mine(e) and self.menu.tk_popup(e.x_root, e.y_root), add="+")
+        self.bind_all("<ButtonRelease-1>", lambda e: self.save(), add="+")
+        self.bind_all("<Double-Button-1>", lambda e: self.refresh(), add="+")
+        self.bind_all("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root), add="+")
 
         self.layout()
-        if self.back is not None:
-            self.update_idletasks()
-            self.no_activate()
-            self.sync()
         self.after(100, self.refresh)
 
     def enabled(self):
@@ -473,82 +494,12 @@ class Widget(tk.Tk):
         self.cfg.update(x=self.winfo_x(), y=self.winfo_y(), compact=self.compact_mode, enabled=self.enabled())
         save_cfg(self.cfg)
 
-    def _mine(self, e):
-        """이벤트가 위젯 본체/배경 창에서 난 것인지 (투명도 슬라이더 창 등은 제외)"""
-        try:
-            return e.widget.winfo_toplevel() in (self, self.back)
-        except Exception:  # noqa: BLE001
-            return False
-
     def _drag_start(self, e):
-        if self._mine(e):
-            self._ox, self._oy = e.x_root - self.winfo_x(), e.y_root - self.winfo_y()
+        self._ox, self._oy = e.x_root - self.winfo_x(), e.y_root - self.winfo_y()
 
     def _drag(self, e):
-        if self._mine(e) and hasattr(self, "_ox"):
+        if hasattr(self, "_ox"):
             self.geometry(f"+{e.x_root - self._ox}+{e.y_root - self._oy}")
-            if self.back is not None:
-                self.back.geometry(f"+{e.x_root - self._ox}+{e.y_root - self._oy}")
-
-    # --- 배경 창 동기화 (Windows) ---
-    def _hwnd(self, win=None):
-        import ctypes
-        return ctypes.windll.user32.GetAncestor((win or self).winfo_id(), 2)  # GA_ROOT
-
-    def no_activate(self):
-        import ctypes
-        u = ctypes.windll.user32
-        for h in (self._hwnd(), self._hwnd(self.back)):
-            u.SetWindowLongW(h, -20, u.GetWindowLongW(h, -20) | 0x08000000 | 0x00000080)  # NOACTIVATE|TOOLWINDOW
-
-    def sync(self):
-        """배경 창을 본체와 같은 자리·크기로 맞추고, 항상 위일 때 본체 바로 뒤에 둔다"""
-        if self.back is None:
-            return
-        try:
-            spec = f"{self.winfo_width()}x{self.winfo_height()}+{self.winfo_x()}+{self.winfo_y()}"
-            if spec != getattr(self, "_spec", None):
-                self._spec = spec
-                self.back.geometry(spec)
-            if self.topmost:
-                import ctypes
-                sp = ctypes.windll.user32.SetWindowPos
-                sp(self._hwnd(self.back), 0, 0, 0, 0, 0, 0x0053)  # 배경 먼저, 그 위에 본체
-                sp(self._hwnd(), 0, 0, 0, 0, 0, 0x0053)
-        except Exception:  # noqa: BLE001
-            pass
-        self.after(100, self.sync)
-
-    def open_alpha(self):
-        """배경 투명도 슬라이더 (왼쪽=투명, 오른쪽=불투명). 글자·사용량 막대는 영향 없음"""
-        if getattr(self, "alpha_win", None) is not None:
-            try:
-                self.alpha_win.lift()
-                return
-            except Exception:  # noqa: BLE001
-                self.alpha_win = None
-        w = tk.Toplevel(self)
-        self.alpha_win = w
-        w.title("배경 투명도")
-        w.attributes("-topmost", True)
-        w.resizable(False, False)
-        w.geometry(f"+{self.winfo_x() + 20}+{self.winfo_y() + self.winfo_height() + 10}")
-        tk.Label(w, text="배경 투명도  (왼쪽: 투명 · 오른쪽: 불투명)", font=(KR, 9)).pack(padx=14, pady=(12, 0))
-        sc = tk.Scale(w, from_=0, to=100, orient="horizontal", length=260, showvalue=True,
-                      command=self.on_alpha)
-        sc.set(round(self.bg_alpha * 100))
-        sc.pack(padx=14, pady=(0, 6))
-        tk.Button(w, text="닫기", command=w.destroy, width=8).pack(pady=(0, 12))
-        w.bind("<ButtonRelease-1>", lambda e: self.save_alpha())
-        w.bind("<Destroy>", lambda e: setattr(self, "alpha_win", None) if e.widget is w else None)
-
-    def on_alpha(self, value):
-        self.bg_alpha = float(value) / 100
-        self.back.attributes("-alpha", max(0.01, self.bg_alpha))  # 0%여도 클릭은 받도록 최소 1%
-
-    def save_alpha(self):
-        self.cfg["bg_alpha"] = self.bg_alpha
-        save_cfg(self.cfg)
 
     def change_theme(self):
         self.cfg["theme"] = self.theme_var.get()
@@ -564,8 +515,6 @@ class Widget(tk.Tk):
     def toggle_top(self):
         self.topmost = not self.topmost
         self.attributes("-topmost", self.topmost)
-        if self.back is not None:
-            self.back.attributes("-topmost", self.topmost)
 
     def redraw_bars(self):
         for s in self.sections.values():
