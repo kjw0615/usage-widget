@@ -276,13 +276,14 @@ DOT = {GREEN: "🟢", YELLOW: "🟡", RED: "🔴"}
 
 
 def title_text(data):
+    """상태표시줄 문구: AI마다 모든 구간(5시간·주간 / Gemini 는 Pro·Flash 일일)을 함께 표시"""
     parts = []
     for n, d in data.items():
         if "error" in d or not d.get("rows"):
             parts.append(f"{ABBR[n]} ⚠{d.get('short', '')}")
         else:
-            remain = d["rows"][0][1]  # 5시간(또는 일일) 남은 %
-            parts.append(f"{DOT[color_for(remain)]}{ABBR[n]} {remain:.0f}%" + ("~" if d.get("stale") else ""))
+            vals = " ".join(f"{DOT[color_for(r)]}{SHORT.get(l, l)} {r:.0f}%" for l, r, _ in d["rows"])
+            parts.append(f"{ABBR[n]} {vals}" + ("~" if d.get("stale") else ""))
     return "  ".join(parts) or "AI …"
 
 
