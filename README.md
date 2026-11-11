@@ -74,23 +74,21 @@ python3 mac/usage_mac.py
 
 > Mac 에는 Python/tkinter 로 만들 수 있는 "위젯"(알림센터·바탕화면 위젯)이 없어서(Apple 전용 WidgetKit 필요), 상태표시줄 방식으로 제공합니다.
 
-## Claude Code 플러그인 (선택)
+## Claude Code 플러그인 (선택, Claude 전용)
 
-위젯 앱과 별개로, Claude Code 안에서 상태줄 + `/ai-usage` 명령으로 같은 정보를 보는 플러그인도 들어 있습니다.
-Windows / macOS 모두 같은 명령으로 설치합니다 (별도 빌드·경고 없음).
+위젯 앱과 별개로, Claude Code 안에서 **Claude 남은 사용량(5시간 · 주간)** 을 상태줄(`Claude 🟢5h 71% 🟢주 93%`)과
+`/ai-usage` 명령으로 보는 플러그인이 들어 있습니다. Windows / macOS 모두 같은 명령으로 설치합니다 (별도 빌드·경고 없음).
 
 ```text
 /plugin install ai-usage --marketplace kjw0615/usage-widget
 ```
-(이 저장소: https://github.com/kjw0615/usage-widget)
 
 | | 위젯 앱 (exe / .app) | Claude Code 플러그인 |
 |---|---|---|
+| 보여주는 AI | Claude · Codex · Gemini (선택) | Claude (5시간·주간) |
 | 동작 시점 | PC가 켜져 있으면 항상 | Claude Code 가 켜져 있을 때만 |
 | 표시 위치 | 작업표시줄 / Mac 상태표시줄 | Claude Code 상태줄 + `/ai-usage` |
 | 설치 | 파일 다운로드 | 명령 한 줄 |
-
-플러그인 설정 `providers` 로 표시할 AI 를 고릅니다 (기본 `Claude,Codex`, 예: `Claude,Codex,Gemini`).
 
 ## 릴리스 만들기 (관리자용)
 ```bash

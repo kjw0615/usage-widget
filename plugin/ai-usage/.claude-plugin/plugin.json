@@ -1,14 +1,6 @@
 {
   "name": "ai-usage",
-  "version": "0.1.0",
-  "description": "Claude / Codex / Gemini 남은 사용량(5시간·주간·일일, 갱신 시각)을 상태줄과 /ai-usage 명령으로 보여줍니다.",
-  "license": "MIT",
-  "userConfig": {
-    "providers": {
-      "type": "string",
-      "title": "표시할 AI",
-      "description": "쉼표로 구분: Claude, Codex, Gemini 중 선택 (예: Claude,Codex,Gemini)",
-      "default": "Claude,Codex"
-    }
-  }
+  "version": "0.2.0",
+  "description": "Claude 남은 사용량(5시간·주간, 갱신 시각)을 Claude Code 상태줄과 /ai-usage 명령으로 보여줍니다.",
+  "license": "MIT"
 }
