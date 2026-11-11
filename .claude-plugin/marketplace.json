@@ -1,0 +1,11 @@
+{
+  "name": "ai-usage-widget",
+  "owner": { "name": "AI Usage Widget contributors" },
+  "plugins": [
+    {
+      "name": "ai-usage",
+      "source": "./plugin/ai-usage",
+      "description": "Claude / Codex / Gemini 남은 사용량(5시간·주간·일일, 갱신 시각)을 Claude Code 상태줄과 /ai-usage 명령으로 보여줍니다."
+    }
+  ]
+}
