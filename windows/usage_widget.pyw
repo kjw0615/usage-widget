@@ -213,6 +213,9 @@ def fetch_codex():
         return err_dict(e)
 
 
+AGY_HEADERS = {"User-Agent": "antigravity"}  # 이 값이 없으면 프로젝트 정보가 비어 조회가 거부된다
+
+
 def read_agy_token():
     """Antigravity CLI(agy) 로그인 정보: OS 보안 저장소(Windows 자격 증명 관리자 / macOS 키체인)의 gemini:antigravity"""
     if IS_MAC:
@@ -257,11 +260,11 @@ def fetch_antigravity():
         for host in ("daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com"):
             base = f"https://{host}/v1internal"
             try:
-                load = http_json(f"{base}:loadCodeAssist", t, {"metadata": {"ideType": "ANTIGRAVITY"}})
+                load = http_json(f"{base}:loadCodeAssist", t, {"metadata": {"ideType": "ANTIGRAVITY"}}, headers=AGY_HEADERS)
                 project = load.get("cloudaicompanionProject")
                 if isinstance(project, dict):
                     project = project.get("id")
-                q = http_json(f"{base}:fetchAvailableModels", t, {"project": project} if project else {})
+                q = http_json(f"{base}:fetchAvailableModels", t, {"project": project} if project else {}, headers=AGY_HEADERS)
                 break
             except urllib.error.HTTPError as e:
                 err = e
