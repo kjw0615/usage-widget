@@ -1,6 +1,6 @@
 # AI Usage Widget
 
-Claude · Codex · Gemini 의 **남은 사용량(5시간 / 주간 / 일일)과 갱신 시각**을 한눈에 보여주는 작은 위젯입니다.
+Claude · Codex · Antigravity(agy) 의 **남은 사용량(5시간 / 주간)과 갱신 시각**을 한눈에 보여주는 작은 위젯입니다.
 
 | OS | 표시 방식 |
 |----|-----------|
@@ -8,10 +8,10 @@ Claude · Codex · Gemini 의 **남은 사용량(5시간 / 주간 / 일일)과 �
 | macOS | 화면 위 상태표시줄(메뉴바) |
 
 - 표시할 AI는 우클릭(Windows) / 메뉴 클릭(Mac)으로 선택합니다. 선택은 저장됩니다.
-- 1분마다 갱신하며, Claude·Gemini·Codex 서버 조회는 요청 제한을 피하려고 2~3분 간격으로만 보냅니다.
+- 1분마다 갱신하며, Claude·Antigravity·Codex 서버 조회는 요청 제한을 피하려고 2~3분 간격으로만 보냅니다.
 - 오류가 나도 마지막 정상값을 흐리게 유지합니다.
 
-> ⚠ Claude·Codex·Gemini 의 사용량 조회 주소는 **공식 문서에 없는 비공식 API** 입니다. 서비스 쪽 변경으로 언제든 동작이 바뀌거나 멈출 수 있습니다.
+> ⚠ Claude·Codex·Antigravity 의 사용량 조회 주소는 **공식 문서에 없는 비공식 API** 입니다. 서비스 쪽 변경으로 언제든 동작이 바뀌거나 멈출 수 있습니다.
 
 ## 먼저 확인: 로그인되어 있어야 합니다
 
@@ -21,7 +21,7 @@ Claude · Codex · Gemini 의 **남은 사용량(5시간 / 주간 / 일일)과 �
 |----|-----------|
 | Claude | Claude Code(CLI 또는 데스크톱 앱 Code 탭) 로그인 |
 | Codex | Codex CLI/앱 로그인 (`~/.codex/auth.json`) |
-| Gemini | Gemini CLI 에서 Google 로그인 (`~/.gemini/oauth_creds.json`) |
+| Antigravity | Antigravity CLI(`agy`) 에서 Google 로그인 (OS 보안 저장소의 `gemini:antigravity`). Gemini·Claude·GPT 그룹별 5시간 한도를 보여줍니다. 로그인 토큰은 `agy` 를 실행할 때 갱신되므로, 한동안 쓰지 않으면 `만료` 로 표시됩니다. (Gemini CLI 는 구독 종료로 지원하지 않습니다) |
 
 한 AI만 로그인돼 있으면 그 AI 값만 나오고 나머지는 `⚠` 로 표시됩니다.
 
@@ -85,7 +85,7 @@ python3 mac/usage_mac.py
 
 | | 위젯 앱 (exe / .app) | Claude Code 플러그인 |
 |---|---|---|
-| 보여주는 AI | Claude · Codex · Gemini (선택) | Claude (5시간·주간) |
+| 보여주는 AI | Claude · Codex · Antigravity (선택) | Claude (5시간·주간) |
 | 동작 시점 | PC가 켜져 있으면 항상 | Claude Code 가 켜져 있을 때만 |
 | 표시 위치 | 작업표시줄 / Mac 상태표시줄 | Claude Code 상태줄 + `/ai-usage` |
 | 설치 | 파일 다운로드 | 명령 한 줄 |

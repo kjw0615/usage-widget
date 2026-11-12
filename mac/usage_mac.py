@@ -1,12 +1,13 @@
-"""AI 남은 사용량 - macOS 상태표시줄(메뉴바) 앱 - Claude / Codex / Gemini
+"""AI 남은 사용량 - macOS 상태표시줄(메뉴바) 앱 - Claude / Codex / Antigravity
 
 - Claude : ~/.claude/.credentials.json (macOS는 키체인) 토큰으로 api.anthropic.com/api/oauth/usage 조회
 - Codex  : ~/.codex/sessions/**/*.jsonl 에 기록된 최신 rate_limits 읽기 (로컬 파일만 사용)
-- Gemini : ~/.gemini/oauth_creds.json 토큰으로 Code Assist 쿼터 조회 (Gemini CLI 로그인 필요, 비공식 API)
+- Antigravity : agy(Antigravity CLI) 로그인 정보(OS 보안 저장소)로 모델 그룹별 5시간 쿼터 조회 (비공식 API)
 조작: 상태표시줄 항목 클릭 -> 상세 내용 / 표시할 AI 선택 / 새로고침 / 종료
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -25,7 +26,7 @@ UI = "Helvetica Neue" if IS_MAC else "Segoe UI"
 
 BG, CARD, FG, DIM = "#1e1f24", "#2a2c33", "#f2f3f5", "#8b8f99"
 GREEN, YELLOW, RED = "#4ade80", "#facc15", "#f87171"
-SHORT = {"5시간": "5h", "주간": "주", "Pro 일일": "Pro", "Flash 일일": "Flash"}
+SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem", "Claude·GPT 5시간": "Cl·GPT"}
 
 
 # ---------- 공통 ----------
@@ -44,7 +45,7 @@ def err_dict(e):
     """예외 -> {"error": 설명, "short": 막대용 짧은 표시, "retry": 재시도 대기(초)}"""
     if isinstance(e, urllib.error.HTTPError):
         if e.code in (401, 403):
-            return {"error": "토큰 만료 - Claude/Gemini CLI 실행 시 자동 갱신", "short": "만료", "retry": 120}
+            return {"error": "토큰 만료 - Claude Code·agy 실행 시 자동 갱신", "short": "만료", "retry": 120}
         if e.code == 429:
             try:
                 wait = int(e.headers.get("Retry-After") or 0)
@@ -158,40 +159,79 @@ def fetch_codex():
         return err_dict(e)
 
 
-def fetch_gemini():
-    """Gemini CLI(Code Assist) 일일 쿼터. 비공식 API라 구조가 바뀌면 동작하지 않을 수 있음."""
+def read_agy_token():
+    """Antigravity CLI(agy) 로그인 정보: OS 보안 저장소(Windows 자격 증명 관리자 / macOS 키체인)의 gemini:antigravity"""
+    if IS_MAC:
+        raw = subprocess.run(["security", "find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        if raw.startswith("go-keyring-base64:"):
+            import base64
+            raw = base64.b64decode(raw.split(":", 1)[1]).decode("utf-8")
+    else:
+        import ctypes
+        from ctypes import wintypes as w
+
+        class CRED(ctypes.Structure):
+            _fields_ = [("Flags", w.DWORD), ("Type", w.DWORD), ("TargetName", w.LPWSTR), ("Comment", w.LPWSTR),
+                        ("LastWritten", w.FILETIME), ("CredentialBlobSize", w.DWORD),
+                        ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)), ("Persist", w.DWORD),
+                        ("AttributeCount", w.DWORD), ("Attributes", ctypes.c_void_p),
+                        ("TargetAlias", w.LPWSTR), ("UserName", w.LPWSTR)]
+        p = ctypes.POINTER(CRED)()
+        if not ctypes.windll.advapi32.CredReadW("gemini:antigravity", 1, 0, ctypes.byref(p)):
+            raise FileNotFoundError("Antigravity 로그인 필요")
+        try:
+            c = p.contents
+            raw = bytes(c.CredentialBlob[:c.CredentialBlobSize]).decode("utf-8")
+        finally:
+            ctypes.windll.advapi32.CredFree(p)
+    return json.loads(raw)["token"]
+
+
+def fetch_antigravity():
+    """Antigravity CLI 모델 그룹별 남은 쿼터(5시간 창). 비공식 API라 구조가 바뀌면 동작하지 않을 수 있음."""
     try:
-        f = HOME / ".gemini" / "oauth_creds.json"
-        if not f.exists():
-            return {"error": "Gemini CLI 로그인 필요 (gemini 실행 후 Google 로그인)"}
-        creds = json.loads(f.read_text(encoding="utf-8"))
-        exp = creds.get("expiry_date", 0) / 1000
-        if exp and exp < datetime.now().timestamp():
-            return {"error": "토큰 만료 - gemini 를 한 번 실행하세요"}
-        tok = creds["access_token"]
-        base = "https://cloudcode-pa.googleapis.com/v1internal"
-        meta = {"metadata": {"ideType": "IDE_UNSPECIFIED", "platform": "PLATFORM_UNSPECIFIED", "pluginType": "GEMINI"}}
-        project = os.environ.get("GOOGLE_CLOUD_PROJECT") or http_json(
-            f"{base}:loadCodeAssist", tok, meta).get("cloudaicompanionProject")
-        if isinstance(project, dict):
-            project = project.get("id")
-        q = http_json(f"{base}:retrieveUserQuota", tok, {"project": project} if project else {})
-        groups = {}  # "Pro"/"Flash" -> (남은 비율 최소, 갱신시각)
-        for b in q.get("buckets", []):
-            m = (b.get("modelId") or "").lower()
-            g = "Pro" if "pro" in m else "Flash" if "flash" in m else None
-            if not g or b.get("remainingFraction") is None:
+        try:
+            tok = read_agy_token()
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return {"error": "Antigravity 로그인 필요 (agy 실행 후 Google 로그인)", "short": "로그인"}
+        exp = re.sub(r"(\.\d{6})\d+", r"\1", tok.get("expiry", ""))
+        if exp and datetime.fromisoformat(exp).timestamp() < time.time():  # 갱신은 agy 가 실행될 때 자동
+            return {"error": "토큰 만료 - agy 를 한 번 실행하세요", "short": "만료", "retry": 120}
+        t = tok["access_token"]
+        err = None
+        for host in ("daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com"):
+            base = f"https://{host}/v1internal"
+            try:
+                load = http_json(f"{base}:loadCodeAssist", t, {"metadata": {"ideType": "ANTIGRAVITY"}})
+                project = load.get("cloudaicompanionProject")
+                if isinstance(project, dict):
+                    project = project.get("id")
+                q = http_json(f"{base}:fetchAvailableModels", t, {"project": project} if project else {})
+                break
+            except urllib.error.HTTPError as e:
+                err = e
+                if e.code in (401, 403, 429):
+                    raise
+        else:
+            raise err
+        groups = {}  # 그룹 -> (남은 비율 최소, 갱신시각)
+        for mid, m in (q.get("models") or {}).items():
+            qi = m.get("quotaInfo") or {}
+            if qi.get("remainingFraction") is None or not qi.get("resetTime"):
                 continue
-            frac = float(b["remainingFraction"])
+            g = "Gemini" if mid.startswith("gemini") else "Claude·GPT" if mid.startswith(("claude", "gpt")) else None
+            if not g:
+                continue
+            frac = float(qi["remainingFraction"])
             if g not in groups or frac < groups[g][0]:
-                groups[g] = (frac, b.get("resetTime"))
+                groups[g] = (frac, qi["resetTime"])
         rows = []
-        for g in ("Pro", "Flash"):
+        for g in ("Gemini", "Claude·GPT"):
             if g in groups:
                 frac, rt = groups[g]
-                reset = datetime.fromisoformat(rt.replace("Z", "+00:00")).astimezone() if rt else None
-                rows.append((f"{g} 일일", frac * 100, reset))
-        return {"rows": rows} if rows else {"error": "쿼터 정보 없음"}
+                rows.append((f"{g} 5시간", frac * 100, datetime.fromisoformat(rt.replace("Z", "+00:00")).astimezone()))
+        return {"rows": rows} if rows else {"error": "쿼터 정보 없음", "short": "없음"}
     except Exception as e:  # noqa: BLE001
         return err_dict(e)
 
@@ -221,7 +261,7 @@ def cached(name, fn, interval):
 PROVIDERS = {
     "Claude": lambda: cached("Claude", fetch_claude, 180),
     "Codex": lambda: cached("Codex", fetch_codex, 120),
-    "Gemini": lambda: cached("Gemini", fetch_gemini, 180),
+    "Antigravity": lambda: cached("Antigravity", fetch_antigravity, 180),
 }
 
 
@@ -246,9 +286,12 @@ CFG_PATH = HOME / "Library" / "Application Support" / "UsageWidget" / "config.js
 
 def load_cfg():
     try:
-        return json.loads(CFG_PATH.read_text(encoding="utf-8"))
+        cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
+    # 예전 설정의 Gemini(CLI 구독 종료) -> Antigravity
+    cfg["enabled"] = [("Antigravity" if n == "Gemini" else n) for n in cfg.get("enabled", [])] or cfg.get("enabled", [])
+    return cfg
 
 
 def save_cfg(cfg):
@@ -271,12 +314,12 @@ def detail_lines(data):
     return out
 
 
-ABBR = {"Claude": "C", "Codex": "X", "Gemini": "G"}
+ABBR = {"Claude": "C", "Codex": "X", "Antigravity": "A"}
 DOT = {GREEN: "🟢", YELLOW: "🟡", RED: "🔴"}
 
 
 def title_text(data):
-    """상태표시줄 문구: AI마다 모든 구간(5시간·주간 / Gemini 는 Pro·Flash 일일)을 함께 표시"""
+    """상태표시줄 문구: AI마다 모든 구간(5시간·주간 / Antigravity 는 Gemini·Claude·GPT 5시간)을 함께 표시"""
     parts = []
     for n, d in data.items():
         if "error" in d or not d.get("rows"):
