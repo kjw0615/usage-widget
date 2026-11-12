@@ -26,7 +26,8 @@ UI = "Helvetica Neue" if IS_MAC else "Segoe UI"
 
 BG, CARD, FG, DIM = "#1e1f24", "#2a2c33", "#f2f3f5", "#8b8f99"
 GREEN, YELLOW, RED = "#4ade80", "#facc15", "#f87171"
-SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem", "Claude·GPT 5시간": "Cl·GPT"}
+SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem 5h", "Gemini 주간": "Gem 주", "Claude·GPT 5시간": "Cl·GPT 5h",
+         "Claude·GPT 주간": "Cl·GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
 
 
 # ---------- 공통 ----------
@@ -191,6 +192,9 @@ def read_agy_token():
     return json.loads(raw)["token"]
 
 
+AGY_ORDER = ("Gemini 5시간", "Gemini 주간", "Claude·GPT 5시간", "Claude·GPT 주간", "Argon 5시간", "Argon 주간")
+
+
 def fetch_antigravity():
     """Antigravity CLI 모델 그룹별 남은 쿼터(5시간 창). 비공식 API라 구조가 바뀌면 동작하지 않을 수 있음."""
     try:
@@ -218,22 +222,49 @@ def fetch_antigravity():
                     raise
         else:
             raise err
-        groups = {}  # 그룹 -> (남은 비율 최소, 갱신시각)
+        def to_dt(rt):
+            return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"", rt.replace("Z", "+00:00"))).astimezone()
+
+        found = {}  # 라벨 -> (남은 %, 갱신시각)
+        # 1) 요약 API: 그룹별 5시간/주간 (Claude·GPT 는 둘 다, Gemini 는 서버가 주는 경우에만)
+        try:
+            sm = http_json(f"{base}:retrieveUserQuotaSummary", t, {"project": project} if project else {}, headers=AGY_HEADERS)
+            for grp in sm.get("groups") or []:
+                nm = (grp.get("displayName") or "").lower()
+                g = "Gemini" if "gemini" in nm else "Claude·GPT" if ("claude" in nm or "gpt" in nm) else None
+                if not g:
+                    continue
+                for bk in grp.get("buckets") or []:
+                    w = "주간" if bk.get("window") == "weekly" else "5시간" if bk.get("window") == "5h" else None
+                    if w and bk.get("remainingFraction") is not None and bk.get("resetTime"):
+                        found[f"{g} {w}"] = (float(bk["remainingFraction"]) * 100, to_dt(bk["resetTime"]))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 429):
+                raise
+        except Exception:  # noqa: BLE001
+            pass
+        # 2) 모델 목록: Argon(주간 한도), 요약에 없는 항목의 보충
+        week = datetime.now(timezone.utc).astimezone().timestamp() + 86400
         for mid, m in (q.get("models") or {}).items():
             qi = m.get("quotaInfo") or {}
             if qi.get("remainingFraction") is None or not qi.get("resetTime"):
                 continue
-            g = "Gemini" if mid.startswith("gemini") else "Claude·GPT" if mid.startswith(("claude", "gpt")) else None
-            if not g:
+            name = ((m.get("displayName") or "") + " " + mid).lower()
+            frac, dt = float(qi["remainingFraction"]) * 100, to_dt(qi["resetTime"])
+            if "argon" in name:
+                key = "Argon 주간" if dt.timestamp() > week else "Argon 5시간"
+            elif mid.startswith("gemini"):
+                key = "Gemini 5시간" if dt.timestamp() <= week else "Gemini 주간"
+            elif mid.startswith(("claude", "gpt")):
+                key = "Claude·GPT 5시간" if dt.timestamp() <= week else "Claude·GPT 주간"
+            else:
                 continue
-            frac = float(qi["remainingFraction"])
-            if g not in groups or frac < groups[g][0]:
-                groups[g] = (frac, qi["resetTime"])
-        rows = []
-        for g in ("Gemini", "Claude·GPT"):
-            if g in groups:
-                frac, rt = groups[g]
-                rows.append((f"{g} 5시간", frac * 100, datetime.fromisoformat(rt.replace("Z", "+00:00")).astimezone()))
+            if key in ("Gemini 5시간", "Claude·GPT 5시간", "Gemini 주간", "Claude·GPT 주간") and key in found:
+                if not key.startswith("Argon") and found[key][0] <= frac:
+                    continue  # 요약 값이 있으면 그것을 우선 (모델별 최소는 요약과 같은 값)
+            if key not in found or frac < found[key][0]:
+                found[key] = (frac, dt)
+        rows = [(l, found[l][0], found[l][1]) for l in AGY_ORDER if l in found]
         return {"rows": rows} if rows else {"error": "쿼터 정보 없음", "short": "없음"}
     except Exception as e:  # noqa: BLE001
         return err_dict(e)
@@ -261,7 +292,7 @@ def cached(name, fn, interval):
     return d
 
 
-AGY_LABELS = ("Gemini 5시간", "Claude·GPT 5시간")  # Antigravity 에서 고를 수 있는 항목
+AGY_LABELS = ("Gemini 5시간", "Gemini 주간", "Claude·GPT 5시간", "Claude·GPT 주간", "Argon 주간")  # Antigravity 에서 고를 수 있는 항목
 AGY = {"items": list(AGY_LABELS)}
 
 

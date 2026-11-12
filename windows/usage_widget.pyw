@@ -40,7 +40,8 @@ def apply_theme(name):
 
 
 apply_theme("dark")  # 작업표시줄 막대는 자체 로직(시스템 테마/설정)으로 색을 정한다
-SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem", "Claude·GPT 5시간": "Cl·GPT"}
+SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem 5h", "Gemini 주간": "Gem 주", "Claude·GPT 5시간": "Cl·GPT 5h",
+         "Claude·GPT 주간": "Cl·GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
 
 
 # ---------- 공통 ----------
@@ -245,6 +246,9 @@ def read_agy_token():
     return json.loads(raw)["token"]
 
 
+AGY_ORDER = ("Gemini 5시간", "Gemini 주간", "Claude·GPT 5시간", "Claude·GPT 주간", "Argon 5시간", "Argon 주간")
+
+
 def fetch_antigravity():
     """Antigravity CLI 모델 그룹별 남은 쿼터(5시간 창). 비공식 API라 구조가 바뀌면 동작하지 않을 수 있음."""
     try:
@@ -272,22 +276,49 @@ def fetch_antigravity():
                     raise
         else:
             raise err
-        groups = {}  # 그룹 -> (남은 비율 최소, 갱신시각)
+        def to_dt(rt):
+            return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"", rt.replace("Z", "+00:00"))).astimezone()
+
+        found = {}  # 라벨 -> (남은 %, 갱신시각)
+        # 1) 요약 API: 그룹별 5시간/주간 (Claude·GPT 는 둘 다, Gemini 는 서버가 주는 경우에만)
+        try:
+            sm = http_json(f"{base}:retrieveUserQuotaSummary", t, {"project": project} if project else {}, headers=AGY_HEADERS)
+            for grp in sm.get("groups") or []:
+                nm = (grp.get("displayName") or "").lower()
+                g = "Gemini" if "gemini" in nm else "Claude·GPT" if ("claude" in nm or "gpt" in nm) else None
+                if not g:
+                    continue
+                for bk in grp.get("buckets") or []:
+                    w = "주간" if bk.get("window") == "weekly" else "5시간" if bk.get("window") == "5h" else None
+                    if w and bk.get("remainingFraction") is not None and bk.get("resetTime"):
+                        found[f"{g} {w}"] = (float(bk["remainingFraction"]) * 100, to_dt(bk["resetTime"]))
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 429):
+                raise
+        except Exception:  # noqa: BLE001
+            pass
+        # 2) 모델 목록: Argon(주간 한도), 요약에 없는 항목의 보충
+        week = datetime.now(timezone.utc).astimezone().timestamp() + 86400
         for mid, m in (q.get("models") or {}).items():
             qi = m.get("quotaInfo") or {}
             if qi.get("remainingFraction") is None or not qi.get("resetTime"):
                 continue
-            g = "Gemini" if mid.startswith("gemini") else "Claude·GPT" if mid.startswith(("claude", "gpt")) else None
-            if not g:
+            name = ((m.get("displayName") or "") + " " + mid).lower()
+            frac, dt = float(qi["remainingFraction"]) * 100, to_dt(qi["resetTime"])
+            if "argon" in name:
+                key = "Argon 주간" if dt.timestamp() > week else "Argon 5시간"
+            elif mid.startswith("gemini"):
+                key = "Gemini 5시간" if dt.timestamp() <= week else "Gemini 주간"
+            elif mid.startswith(("claude", "gpt")):
+                key = "Claude·GPT 5시간" if dt.timestamp() <= week else "Claude·GPT 주간"
+            else:
                 continue
-            frac = float(qi["remainingFraction"])
-            if g not in groups or frac < groups[g][0]:
-                groups[g] = (frac, qi["resetTime"])
-        rows = []
-        for g in ("Gemini", "Claude·GPT"):
-            if g in groups:
-                frac, rt = groups[g]
-                rows.append((f"{g} 5시간", frac * 100, datetime.fromisoformat(rt.replace("Z", "+00:00")).astimezone()))
+            if key in ("Gemini 5시간", "Claude·GPT 5시간", "Gemini 주간", "Claude·GPT 주간") and key in found:
+                if not key.startswith("Argon") and found[key][0] <= frac:
+                    continue  # 요약 값이 있으면 그것을 우선 (모델별 최소는 요약과 같은 값)
+            if key not in found or frac < found[key][0]:
+                found[key] = (frac, dt)
+        rows = [(l, found[l][0], found[l][1]) for l in AGY_ORDER if l in found]
         return {"rows": rows} if rows else {"error": "쿼터 정보 없음", "short": "없음"}
     except Exception as e:  # noqa: BLE001
         return err_dict(e)
@@ -315,7 +346,7 @@ def cached(name, fn, interval):
     return d
 
 
-AGY_LABELS = ("Gemini 5시간", "Claude·GPT 5시간")  # Antigravity 에서 고를 수 있는 항목
+AGY_LABELS = ("Gemini 5시간", "Gemini 주간", "Claude·GPT 5시간", "Claude·GPT 주간", "Argon 주간")  # Antigravity 에서 고를 수 있는 항목
 AGY = {"items": list(AGY_LABELS)}
 
 
@@ -336,6 +367,20 @@ PROVIDERS = {
     "Codex": lambda: cached("Codex", fetch_codex, 120),
     "Antigravity": fetch_antigravity_selected,
 }
+
+
+def popup_menu(win, menu, x, y):
+    """우클릭 메뉴. 활성화되지 않는 창(작업표시줄 모드)은 먼저 앞으로 가져와야 바깥 클릭 때 메뉴가 닫힌다."""
+    try:
+        import ctypes
+        h = ctypes.windll.user32.GetAncestor(win.winfo_id(), 2)
+        ctypes.windll.user32.SetForegroundWindow(h)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        menu.tk_popup(x, y)
+    finally:
+        menu.grab_release()
 
 
 def agy_menu(parent, owner, on_change):
@@ -529,7 +574,7 @@ class Widget(tk.Tk):
         self.bind_all("<B1-Motion>", self._drag, add="+")
         self.bind_all("<ButtonRelease-1>", lambda e: self.save(), add="+")
         self.bind_all("<Double-Button-1>", lambda e: self.refresh(), add="+")
-        self.bind_all("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root), add="+")
+        self.bind_all("<Button-3>", lambda e: popup_menu(self, self.menu, e.x_root, e.y_root), add="+")
 
         self.layout()
         self.after(100, self.refresh)
@@ -726,7 +771,7 @@ class TaskbarBar(tk.Tk):
         self.grip.pack(side="left", fill="y", padx=(4, 6), pady=10)
         self.inner = tk.Frame(self, bg=self.bg)
         self.inner.pack(side="left", expand=True, padx=(2, 8))
-        self.bind_all("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root), add="+")
+        self.bind_all("<Button-3>", lambda e: popup_menu(self, self.menu, e.x_root, e.y_root), add="+")
         self.bind_all("<ButtonPress-1>", self._drag_start, add="+")
         self.bind_all("<B1-Motion>", self._drag, add="+")
         self.bind_all("<ButtonRelease-1>", self._drag_end, add="+")
@@ -853,8 +898,7 @@ class TaskbarBar(tk.Tk):
             save_cfg(self.cfg)
         elif self._drag_dx is not None:  # 끌지 않고 클릭(손잡이든 글자든) -> 메뉴
             self._tip_hide(None)
-            self.menu.tk_popup(e.x_root, e.y_root)
-            self.menu.grab_release()
+            popup_menu(self, self.menu, e.x_root, e.y_root)
         self._drag_dx = None
 
     # --- 툴팁: 갱신 시각 등 상세 ---

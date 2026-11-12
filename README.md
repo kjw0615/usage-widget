@@ -21,7 +21,7 @@ Claude · Codex · Antigravity(agy) 의 **남은 사용량(5시간 / 주간)과 
 |----|-----------|
 | Claude | Claude Code(CLI 또는 데스크톱 앱 Code 탭) 로그인 |
 | Codex | Codex CLI/앱 로그인 (`~/.codex/auth.json`) |
-| Antigravity | Antigravity CLI(`agy`) 에서 Google 로그인 (OS 보안 저장소의 `gemini:antigravity`). Gemini·Claude·GPT 그룹별 5시간 한도를 보여줍니다. 로그인 토큰은 `agy` 를 실행할 때 갱신되므로, 한동안 쓰지 않으면 `만료` 로 표시됩니다. (Gemini CLI 는 구독 종료로 지원하지 않습니다) |
+| Antigravity | Antigravity CLI(`agy`) 에서 Google 로그인 (OS 보안 저장소의 `gemini:antigravity`). Gemini 5시간, Claude·GPT 5시간·주간을 보여주고, 서버가 내려주는 경우 Gemini 주간과 Argon 주간도 표시합니다(우클릭 메뉴 `Antigravity 항목`에서 고르기). 로그인 토큰은 `agy` 를 실행할 때 갱신되므로, 한동안 쓰지 않으면 `만료` 로 표시됩니다. (Gemini CLI 는 구독 종료로 지원하지 않습니다) |
 
 한 AI만 로그인돼 있으면 그 AI 값만 나오고 나머지는 `⚠` 로 표시됩니다.
 
