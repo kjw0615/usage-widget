@@ -369,6 +369,38 @@ PROVIDERS = {
 }
 
 
+def fullscreen_active():
+    """전체화면 앱(게임·영상·F11)이 앞에 있는가. 제목 표시줄 없이 모니터 전체를 덮은 창을 전체화면으로 본다."""
+    if IS_MAC:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes as w
+        u = ctypes.windll.user32
+        h = u.GetForegroundWindow()
+        if not h:
+            return False
+        cls = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(h, cls, 64)
+        if cls.value in ("Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"):
+            return False
+        if u.GetWindowLongW(h, -16) & 0x00C00000:  # WS_CAPTION: 일반 창(최대화 포함)은 제외
+            return False
+
+        class MI(ctypes.Structure):
+            _fields_ = [("cbSize", w.DWORD), ("rcMonitor", w.RECT), ("rcWork", w.RECT), ("dwFlags", w.DWORD)]
+        mi = MI()
+        mi.cbSize = ctypes.sizeof(MI)
+        if not u.GetMonitorInfoW(u.MonitorFromWindow(h, 2), ctypes.byref(mi)):
+            return False
+        r = w.RECT()
+        u.GetWindowRect(h, ctypes.byref(r))
+        m = mi.rcMonitor
+        return r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def popup_menu(win, menu, x, y):
     """우클릭 메뉴. 활성화되지 않는 창(작업표시줄 모드)은 먼저 앞으로 가져와야 바깥 클릭 때 메뉴가 닫힌다."""
     try:
@@ -578,11 +610,14 @@ class Widget(tk.Tk):
         menu.add_cascade(label="테마", menu=tmenu)
         menu.add_command(label="지금 새로고침", command=self.refresh)
         menu.add_command(label="항상 위 토글", command=self.toggle_top)
+        self.fs_var = tk.BooleanVar(value=self.cfg.get("fs_hide", True))
+        menu.add_checkbutton(label="전체화면 앱 위에서는 숨기기", variable=self.fs_var, command=self.fs_changed)
         menu.add_command(label="상태표시줄 모드로 전환" if IS_MAC else "작업표시줄 모드로 전환",
                          command=lambda: self.to_display("taskbar"))
         menu.add_separator()
         menu.add_command(label="종료", command=self.destroy)
         self.menu = menu
+        self.after(500, self.fs_watch)
 
         self.bind_all("<ButtonPress-1>", self._drag_start, add="+")
         self.bind_all("<B1-Motion>", self._drag, add="+")
@@ -658,6 +693,17 @@ class Widget(tk.Tk):
     def toggle_top(self):
         self.topmost = not self.topmost
         self.attributes("-topmost", self.topmost)
+
+    def fs_changed(self):
+        self.cfg["fs_hide"] = self.fs_var.get()
+        save_cfg(self.cfg)
+
+    def fs_watch(self):
+        """전체화면 앱이 앞에 있는 동안은 '항상 위'를 잠시 끈다"""
+        want = self.topmost and not (self.fs_var.get() and fullscreen_active())
+        if want != bool(self.attributes("-topmost")):
+            self.attributes("-topmost", want)
+        self.after(500, self.fs_watch)
 
     def redraw_bars(self):
         for s in self.sections.values():
@@ -775,6 +821,8 @@ class TaskbarBar(tk.Tk):
             tmenu.add_radiobutton(label=label, value=key, variable=self.bar_theme, command=self.change_bar_theme)
         menu.add_cascade(label="테마", menu=tmenu)
         menu.add_separator()
+        self.fs_var = tk.BooleanVar(value=self.cfg.get("fs_hide", True))
+        menu.add_checkbutton(label="전체화면 앱 위에서는 숨기기", variable=self.fs_var, command=self.fs_changed)
         menu.add_command(label="위젯 창 모드로 전환", command=lambda: self.switch("widget"))
         menu.add_command(label="종료", command=self.destroy)
         self.menu = menu
@@ -879,9 +927,21 @@ class TaskbarBar(tk.Tk):
             ex = u.GetWindowLongW(h, -20)
             u.SetWindowLongW(h, -20, ex | 0x08000000 | 0x00000080)  # WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
 
+    def fs_changed(self):
+        self.cfg["fs_hide"] = self.fs_var.get()
+        save_cfg(self.cfg)
+
     def keep_on_top(self):
         """작업표시줄이 클릭돼 앞으로 올라오면 0.1초 안에 다시 최상위로 (활성화 없이)"""
         import ctypes
+        hide = self.fs_var.get() and fullscreen_active()  # 전체화면 앱 위에서는 숨김
+        if hide != getattr(self, "_fs_hidden", False):
+            self._fs_hidden = hide
+            for win in (self, self.hit):
+                win.withdraw() if hide else win.deiconify()
+        if hide:
+            self.after(200, self.keep_on_top)
+            return
         try:
             # 이미 TOPMOST 인 창에 HWND_TOPMOST 를 주면 순서가 안 바뀌므로 HWND_TOP(0)으로
             # 최상위 그룹 맨 앞으로 올린다. SWP_NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW = 0x1|0x2|0x10|0x40
