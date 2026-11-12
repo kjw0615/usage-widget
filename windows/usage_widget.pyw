@@ -109,6 +109,22 @@ def fetch_claude():
 SHARED_CLAUDE = HOME / ".claude" / "ai-usage-cache.json"  # Claude Code 플러그인(ai-usage)과 공유하는 캐시
 
 
+FORCE = {"on": False}
+
+
+def min_gap(interval):
+    """조회 최소 간격(초). 수동 새로고침일 때는 20초까지 줄인다 (429 백오프는 그대로 지킴)"""
+    return min(interval, 20) if FORCE["on"] else interval
+
+
+def safe_fetch(name):
+    """조회 중 예외가 나도 새로고침 루프가 멈추지 않게 오류 표시로 바꾼다"""
+    try:
+        return PROVIDERS[name]()
+    except Exception as e:  # noqa: BLE001
+        return err_dict(e)
+
+
 def fetch_claude_shared():
     """위젯·플러그인·여러 세션이 각자 조회하면 요청 제한(429)에 걸리므로, 최근 조회 결과를 파일로 공유한다."""
     now = time.time() * 1000
@@ -118,7 +134,7 @@ def fetch_claude_shared():
     except Exception:  # noqa: BLE001
         pass
     view = sh.get("view")
-    if view and (now < sh.get("until", 0) or now - sh.get("t", 0) < 180_000):
+    if view and (now < sh.get("until", 0) or now - sh.get("t", 0) < min_gap(180) * 1000):
         if view.get("rows"):
             d = {"rows": [(r["label"], float(r["remain"]),
                            datetime.fromtimestamp(r["resetMs"] / 1000).astimezone()) for r in view["rows"]]}
@@ -331,7 +347,7 @@ def cached(name, fn, interval):
     """오류가 나도 마지막 정상값을 유지(stale)하고, 429 등은 대기 후 재시도. 수동 새로고침도 최소 간격은 지킴."""
     st = _state.setdefault(name, {"t": 0.0, "until": 0.0, "view": None, "good": None})
     now = time.time()
-    if st["view"] is not None and (now < st["until"] or now - st["t"] < interval):
+    if st["view"] is not None and (now < st["until"] or now - st["t"] < min_gap(interval)):
         return st["view"]
     st["t"] = now
     d = fn()
@@ -608,7 +624,7 @@ class Widget(tk.Tk):
         for key, label in (("light", "밝은 테마"), ("dark", "다크 테마")):
             tmenu.add_radiobutton(label=label, value=key, variable=self.theme_var, command=self.change_theme)
         menu.add_cascade(label="테마", menu=tmenu)
-        menu.add_command(label="지금 새로고침", command=self.refresh)
+        menu.add_command(label="지금 새로고침", command=lambda: self.refresh(True))
         menu.add_command(label="항상 위 토글", command=self.toggle_top)
         self.fs_var = tk.BooleanVar(value=self.cfg.get("fs_hide", True))
         menu.add_checkbutton(label="전체화면 앱 위에서는 숨기기", variable=self.fs_var, command=self.fs_changed)
@@ -622,7 +638,7 @@ class Widget(tk.Tk):
         self.bind_all("<ButtonPress-1>", self._drag_start, add="+")
         self.bind_all("<B1-Motion>", self._drag, add="+")
         self.bind_all("<ButtonRelease-1>", lambda e: self.save(), add="+")
-        self.bind_all("<Double-Button-1>", lambda e: self.refresh(), add="+")
+        self.bind_all("<Double-Button-1>", lambda e: self.refresh(True), add="+")
         self.bind_all("<Button-3>", lambda e: popup_menu(self, self.menu, e.x_root, e.y_root), add="+")
 
         self.layout()
@@ -710,7 +726,7 @@ class Widget(tk.Tk):
             s.redraw()
 
     # 네트워크 조회는 별도 스레드 (UI 멈춤 방지)
-    def refresh(self):
+    def refresh(self, force=False):
         if getattr(self, "_busy", False):
             return
         self._busy = True
@@ -719,7 +735,11 @@ class Widget(tk.Tk):
         self._result = None
 
         def work():  # 스레드에서는 tk 를 건드리지 않고 결과만 저장
-            self._result = {n: PROVIDERS[n]() for n in names}
+            FORCE["on"] = force  # 수동 새로고침은 캐시 간격을 줄여서(20초) 새로 조회
+            try:
+                self._result = {n: safe_fetch(n) for n in names}
+            finally:
+                FORCE["on"] = False
 
         def poll():
             if self._result is None:
@@ -814,7 +834,7 @@ class TaskbarBar(tk.Tk):
         menu.add_separator()
         menu.add_command(label="위치: 왼쪽 끝", command=lambda: self.set_side("left"))
         menu.add_command(label="위치: 오른쪽 (알림영역 옆)", command=lambda: self.set_side("right"))
-        menu.add_command(label="지금 새로고침", command=self.refresh)
+        menu.add_command(label="지금 새로고침", command=lambda: self.refresh(True))
         tmenu = tk.Menu(menu, tearoff=0)
         self.bar_theme = tk.StringVar(value=self.cfg.get("theme_bar", "auto"))
         for key, label in (("auto", "자동 (작업표시줄 테마 따라감)"), ("light", "밝은 테마"), ("dark", "다크 테마")):
@@ -1013,7 +1033,7 @@ class TaskbarBar(tk.Tk):
         relaunch(display)
         self.destroy()
 
-    def refresh(self):
+    def refresh(self, force=False):
         if getattr(self, "_busy", False):
             return
         self._busy = True
@@ -1021,7 +1041,11 @@ class TaskbarBar(tk.Tk):
         self._result = None
 
         def work():
-            self._result = {n: PROVIDERS[n]() for n in names}
+            FORCE["on"] = force  # 수동 새로고침은 캐시 간격을 줄여서(20초) 새로 조회
+            try:
+                self._result = {n: safe_fetch(n) for n in names}
+            finally:
+                FORCE["on"] = False
 
         def poll():
             if self._result is None:
