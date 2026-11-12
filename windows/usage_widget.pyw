@@ -40,8 +40,8 @@ def apply_theme(name):
 
 
 apply_theme("dark")  # 작업표시줄 막대는 자체 로직(시스템 테마/설정)으로 색을 정한다
-SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem 5h", "Gemini 주간": "Gem 주", "Claude·GPT 5시간": "Cl·GPT 5h",
-         "Claude·GPT 주간": "Cl·GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
+SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gemi 5h", "Gemini 주간": "Gemi 주", "Claude·GPT 5시간": "GPT 5h",
+         "Claude·GPT 주간": "GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
 
 
 # ---------- 공통 ----------
@@ -452,7 +452,7 @@ class Section:
         self.title = tk.Frame(self.f, bg=BG)
         self.title.pack(fill="x", padx=10, pady=(5, 0))
         tk.Label(self.title, text=name, bg=BG, fg=FG, font=(UI, 9, "bold")).pack(side="left")
-        self.rows = [Row(self.f), Row(self.f)]
+        self.rows = [Row(self.f) for _ in range(6)]
         self.err = tk.Label(self.f, text="", bg=BG, fg=RED, font=(KR, 8), anchor="w", wraplength=230, justify="left")
 
     def show(self, data):
@@ -476,28 +476,42 @@ class Section:
 
 
 class CompactRow:
-    """간소화 모드 한 줄: 이름  5h 85% ~22:30  주 94% ~11/17 13:00"""
+    """간소화 모드: 이름  5h 85% ~22:30  주 94% ~11/17 13:00  (한 줄에 2개, 3개째부터는 아래 줄)"""
+
+    PER_LINE = 2
+    MAX = 6
 
     def __init__(self, parent, name):
         self.f = tk.Frame(parent, bg=BG)
-        tk.Label(self.f, text=name, bg=BG, fg=FG, font=(UI, 9, "bold"), width=6, anchor="w").pack(side="left")
+        self.lines = []
         self.cells = []
-        for _ in range(2):
-            self.cells.append((tk.Label(self.f, bg=BG, fg=DIM, font=(KR, 8)),
-                               tk.Label(self.f, bg=BG, fg=FG, font=(UI, 10, "bold")),
-                               tk.Label(self.f, bg=BG, fg=DIM, font=(KR, 8))))
-        self.err = tk.Label(self.f, text="", bg=BG, fg=RED, font=(KR, 8))
+        for i in range(self.MAX // self.PER_LINE):
+            line = tk.Frame(self.f, bg=BG)
+            tk.Label(line, text=name if i == 0 else "", bg=BG, fg=FG, font=(UI, 9, "bold"), width=9,
+                     anchor="w").pack(side="left")
+            self.lines.append(line)
+            for _ in range(self.PER_LINE):
+                self.cells.append((tk.Label(line, bg=BG, fg=DIM, font=(KR, 8)),
+                                   tk.Label(line, bg=BG, fg=FG, font=(UI, 10, "bold")),
+                                   tk.Label(line, bg=BG, fg=DIM, font=(KR, 8))))
+        self.err = tk.Label(self.lines[0], text="", bg=BG, fg=RED, font=(KR, 8))
 
     def show(self, data):
         for cell in self.cells:
             for w in cell:
                 w.pack_forget()
+        for line in self.lines:
+            line.pack_forget()
         self.err.pack_forget()
+        self.lines[0].pack(fill="x")
         if "error" in data:
             self.err.config(text="⚠ " + data["error"][:22])
             self.err.pack(side="left", padx=4)
             return
-        for (t, p, r), (label, remain, dt) in zip(self.cells, data["rows"]):
+        rows = data["rows"][:self.MAX]
+        for i in range(0, len(rows), self.PER_LINE):
+            self.lines[i // self.PER_LINE].pack(fill="x")
+        for (t, p, r), (label, remain, dt) in zip(self.cells, rows):
             t.config(text=SHORT.get(label, label))
             p.config(text=f"{remain:.0f}%", fg=color_for(remain))
             r.config(text=short_reset(dt, tilde=True))

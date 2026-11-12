@@ -26,8 +26,8 @@ UI = "Helvetica Neue" if IS_MAC else "Segoe UI"
 
 BG, CARD, FG, DIM = "#1e1f24", "#2a2c33", "#f2f3f5", "#8b8f99"
 GREEN, YELLOW, RED = "#4ade80", "#facc15", "#f87171"
-SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gem 5h", "Gemini 주간": "Gem 주", "Claude·GPT 5시간": "Cl·GPT 5h",
-         "Claude·GPT 주간": "Cl·GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
+SHORT = {"5시간": "5h", "주간": "주", "Gemini 5시간": "Gemi 5h", "Gemini 주간": "Gemi 주", "Claude·GPT 5시간": "GPT 5h",
+         "Claude·GPT 주간": "GPT 주", "Argon 5시간": "Argon 5h", "Argon 주간": "Argon 주"}
 
 
 # ---------- 공통 ----------
