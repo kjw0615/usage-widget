@@ -315,11 +315,47 @@ def cached(name, fn, interval):
     return d
 
 
+AGY_LABELS = ("Gemini 5시간", "Claude·GPT 5시간")  # Antigravity 에서 고를 수 있는 항목
+AGY = {"items": list(AGY_LABELS)}
+
+
+def agy_apply(cfg):
+    """저장된 설정의 Antigravity 표시 항목을 적용 (비어 있으면 전부)"""
+    AGY["items"] = [l for l in AGY_LABELS if l in cfg.get("agy_items", AGY_LABELS)] or list(AGY_LABELS)
+
+
+def fetch_antigravity_selected():
+    d = cached("Antigravity", fetch_antigravity, 180)
+    if "rows" not in d:
+        return d
+    return {**d, "rows": [r for r in d["rows"] if r[0] in AGY["items"]] or d["rows"]}
+
+
 PROVIDERS = {
     "Claude": lambda: cached("Claude", fetch_claude_shared, 180),
     "Codex": lambda: cached("Codex", fetch_codex, 120),
-    "Antigravity": lambda: cached("Antigravity", fetch_antigravity, 180),
+    "Antigravity": fetch_antigravity_selected,
 }
+
+
+def agy_menu(parent, owner, on_change):
+    """우클릭 메뉴의 'Antigravity 항목' 하위 메뉴 (체크 = 표시)"""
+    sub = tk.Menu(parent, tearoff=0)
+    owner.agy_vars = {l: tk.BooleanVar(value=l in AGY["items"]) for l in AGY_LABELS}
+
+    def changed():
+        chosen = [l for l in AGY_LABELS if owner.agy_vars[l].get()]
+        if not chosen:  # 최소 1개는 유지
+            owner.agy_vars[AGY_LABELS[0]].set(True)
+            chosen = [AGY_LABELS[0]]
+        AGY["items"] = chosen
+        owner.cfg["agy_items"] = chosen
+        save_cfg(owner.cfg)
+        on_change()
+
+    for l in AGY_LABELS:
+        sub.add_checkbutton(label=l, variable=owner.agy_vars[l], command=changed)
+    parent.add_cascade(label="Antigravity 항목", menu=sub)
 
 
 # ---------- 표시 보조 ----------
@@ -472,6 +508,8 @@ class Widget(tk.Tk):
         menu.add_command(label="표시할 AI 선택", state="disabled")
         for n in PROVIDERS:
             menu.add_checkbutton(label=n, variable=self.vars[n], command=self.on_select)
+        agy_apply(self.cfg)
+        agy_menu(menu, self, self.refresh)
         menu.add_separator()
         menu.add_command(label="간소화/전체 모드 전환", command=self.toggle_mode)
         tmenu = tk.Menu(menu, tearoff=0)
@@ -666,6 +704,8 @@ class TaskbarBar(tk.Tk):
         menu.add_command(label="표시할 AI 선택", state="disabled")
         for n in PROVIDERS:
             menu.add_checkbutton(label=n, variable=self.vars[n], command=self.on_select)
+        agy_apply(self.cfg)
+        agy_menu(menu, self, lambda: (self.build(), self.refresh()))
         menu.add_separator()
         menu.add_command(label="위치: 왼쪽 끝", command=lambda: self.set_side("left"))
         menu.add_command(label="위치: 오른쪽 (알림영역 옆)", command=lambda: self.set_side("right"))
@@ -908,6 +948,7 @@ def detail_lines(data):
 
 
 def tray_fetch(cfg):
+    agy_apply(cfg)
     names = [n for n in PROVIDERS if n in cfg.get("enabled", ["Claude", "Codex"])] or ["Claude"]
     return {n: PROVIDERS[n]() for n in names}
 

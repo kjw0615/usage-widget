@@ -261,10 +261,26 @@ def cached(name, fn, interval):
     return d
 
 
+AGY_LABELS = ("Gemini 5시간", "Claude·GPT 5시간")  # Antigravity 에서 고를 수 있는 항목
+AGY = {"items": list(AGY_LABELS)}
+
+
+def agy_apply(cfg):
+    """저장된 설정의 Antigravity 표시 항목을 적용 (비어 있으면 전부)"""
+    AGY["items"] = [l for l in AGY_LABELS if l in cfg.get("agy_items", AGY_LABELS)] or list(AGY_LABELS)
+
+
+def fetch_antigravity_selected():
+    d = cached("Antigravity", fetch_antigravity, 180)
+    if "rows" not in d:
+        return d
+    return {**d, "rows": [r for r in d["rows"] if r[0] in AGY["items"]] or d["rows"]}
+
+
 PROVIDERS = {
     "Claude": lambda: cached("Claude", fetch_claude, 180),
     "Codex": lambda: cached("Codex", fetch_codex, 120),
-    "Antigravity": lambda: cached("Antigravity", fetch_antigravity, 180),
+    "Antigravity": fetch_antigravity_selected,
 }
 
 
@@ -337,6 +353,7 @@ def main():
     import rumps
 
     cfg = load_cfg()
+    agy_apply(cfg)
 
     def enabled():
         en = [n for n in PROVIDERS if n in cfg.get("enabled", ["Claude", "Codex"])]
@@ -383,9 +400,24 @@ def main():
                 item = rumps.MenuItem(n, callback=self.toggle)
                 item.state = n in enabled()
                 self.menu.add(item)
+            sub = rumps.MenuItem("Antigravity 항목")
+            for l in AGY_LABELS:
+                it = rumps.MenuItem(l, callback=self.toggle_agy)
+                it.state = l in AGY["items"]
+                sub.add(it)
+            self.menu.add(sub)
             self.menu.add(None)
             self.menu.add(rumps.MenuItem("지금 새로고침", callback=self.tick))
             self.menu.add(rumps.MenuItem("종료", callback=lambda _: rumps.quit_application()))
+
+        def toggle_agy(self, sender):
+            chosen = set(AGY["items"])
+            chosen.symmetric_difference_update({sender.title})
+            cfg["agy_items"] = [l for l in AGY_LABELS if l in chosen] or [sender.title]
+            save_cfg(cfg)
+            agy_apply(cfg)
+            self.pending = {n: PROVIDERS[n]() for n in enabled()}  # 캐시된 값에서 항목만 다시 거름
+            self.apply(None)
 
         def toggle(self, sender):
             en = set(enabled())
