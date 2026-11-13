@@ -21,7 +21,7 @@ Claude · Codex · Antigravity(agy) 의 **남은 사용량(5시간 / 주간)과 
 |----|-----------|
 | Claude | Claude Code(CLI 또는 데스크톱 앱 Code 탭) 로그인 |
 | Codex | Codex CLI/앱 로그인 (`~/.codex/auth.json`) |
-| Antigravity | Antigravity CLI(`agy`) 에서 Google 로그인 (OS 보안 저장소의 `gemini:antigravity`). Gemini 5시간, Claude·GPT 5시간·주간을 보여주고, 서버가 내려주는 경우 Gemini 주간과 Argon 주간도 표시합니다(우클릭 메뉴 `Antigravity 항목`에서 고르기). 로그인 토큰은 `agy` 를 실행할 때 갱신되므로, 한동안 쓰지 않으면 `만료` 로 표시됩니다. (Gemini CLI 는 구독 종료로 지원하지 않습니다) |
+| Antigravity | Antigravity CLI(`agy`) 에서 Google 로그인 (OS 보안 저장소의 `gemini:antigravity`). Gemini 5시간, Claude·GPT 5시간·주간을 보여주고, 서버가 내려주는 경우 Gemini 주간과 Argon 주간도 표시합니다(우클릭 메뉴 `Antigravity 항목`에서 고르기). 로그인 토큰은 `agy` 를 실행할 때 갱신되므로, 한동안 쓰지 않으면 `만료` 로 표시됩니다. (Gemini CLI 는 구독 종료로 지원하지 않습니다) **`windows_v2` 는 `agy -p /usage` 명령 결과를 직접 읽어** Gemini·Claude·GPT·Argon 의 5시간/주간 값을 더 정확하게 가져옵니다. 이 명령이 실패하면 기존 내부 API 방식으로 자동 전환됩니다. |
 
 한 AI만 로그인돼 있으면 그 AI 값만 나오고 나머지는 `⚠` 로 표시됩니다.
 
@@ -50,6 +50,16 @@ Python 3.10+ 설치 후:
 python windows/usage_widget.pyw
 ```
 직접 exe 만들기: `pip install pyinstaller` → `pyinstaller --onefile --noconsole --name UsageWidget windows/usage_widget.pyw`
+
+### windows_v2 (Antigravity 사용량 개선판)
+`windows_v2/usage_widget.pyw` 는 `windows/` 와 같은 위젯이며, Antigravity 사용량을 `agy -p /usage` 명령으로 조회합니다.
+- `agy` 는 PATH 또는 `%LOCALAPPDATA%\agy\bin\agy.exe` 에서 찾습니다. (Antigravity CLI 설치·로그인 필요)
+- 명령이 실패하면 기존 방식(저장된 로그인 토큰으로 서버 조회)으로 자동 전환됩니다.
+```bash
+python windows_v2/usage_widget.pyw
+```
+exe 로 만들기: `pyinstaller --onefile --noconsole --name UsageWidget windows_v2/usage_widget.pyw`
+(Releases 의 exe 는 아직 `windows/` 기준 빌드입니다.)
 
 ## macOS 설치
 
